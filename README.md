@@ -75,26 +75,3 @@ python ciphers.py --plaintext "Hello World" -o output.txt
 
 # Default output files: encrypted_[method].txt and decrypted_[method].txt
 ```
-
-## Implementation Details
-
-Plan for README.md:
-
-1. Project description
-2. Features
-3. Installation
-4. Usage examples
-5. Implementation details
-
-```markdown
-# AES/Vigenère Cipher Implementation
-
-A Python implementation of AES (Advanced Encryption Standard) with an option to replace the SubBytes operation with a Vigenère cipher.
-
-## Features
-
-- Standard AES-128 implementation
-- Hybrid mode replacing SubBytes with Vigenère cipher
-- Case-preserving Vigenère cipher implementation
-- Support for file input/output
-- Command-line interface
