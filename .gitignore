@@ -1,0 +1,6 @@
+# Ignore all
+*
+# Except for these
+!.gitignore
+!README.md
+!ciphers.py

@@ -1,3 +1,6 @@
+import sys
+import argparse
+
 Sbox = (
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
     0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
@@ -38,7 +41,8 @@ InvSbox = (
 
 
 # learnt from http://cs.ucsb.edu/~koc/cs178/projects/JT/aes.c
-xtime = lambda a: (((a << 1) ^ 0x1B) & 0xFF) if (a & 0x80) else (a << 1)
+def xtime(a):
+    return (a << 1 ^ 27) & 255 if a & 128 else a << 1
 
 
 Rcon = (
@@ -67,8 +71,12 @@ def matrix2text(matrix):
     return text
 
 class AES:
-    def __init__(self, master_key):
+    def __init__(self, master_key, use_vigenere=False):
+        self.key = None
         self.change_key(master_key)
+        self.use_vigenere = use_vigenere
+        self.vigenere_key = "SECRETKEY"  # Can be made configurable
+        self.vig = VigenereCipher(self.vigenere_key)
 
     def change_key(self, master_key):
     # Convert master key into a matrix and initialize round keys
@@ -134,14 +142,34 @@ class AES:
         self.__inv_sub_bytes(state_matrix)
 
     def __sub_bytes(self, s):
-        for i in range(4):
-            for j in range(4):
-                s[i][j] = Sbox[s[i][j]]
+        if not self.use_vigenere:
+            # Original AES SubBytes
+            for i in range(4):
+                for j in range(4):
+                    s[i][j] = Sbox[s[i][j]]
+        else:
+            # Vigenere SubBytes
+            for i in range(4):
+                for j in range(4):
+                    # Convert byte to char and apply Vigenere
+                    char = chr(s[i][j] % 26 + ord('A'))
+                    encrypted = self.vig.encrypt(char)
+                    s[i][j] = ord(encrypted[0]) - ord('A')
 
     def __inv_sub_bytes(self, s):
-        for i in range(4):
-            for j in range(4):
-                s[i][j] = InvSbox[s[i][j]]
+        if not self.use_vigenere:
+            # Original AES InvSubBytes
+            for i in range(4):
+                for j in range(4):
+                    s[i][j] = InvSbox[s[i][j]]
+        else:
+            # Vigenere InvSubBytes
+            for i in range(4):
+                for j in range(4):
+                    # Convert byte to char and apply Vigenere decrypt
+                    char = chr(s[i][j] % 26 + ord('A'))
+                    decrypted = self.vig.decrypt(char)
+                    s[i][j] = ord(decrypted[0]) - ord('A')
 
     def __shift_rows(self, s):
         s[1] = s[1][1:] + s[1][:1]
@@ -177,31 +205,146 @@ class AES:
         self.__mix_columns(s)
 
 
+class VigenereCipher:
+    def __init__(self, key):
+        self.key = key.upper()
+        self.original_text = None
+        self.case_pattern = None
+    
+    def encrypt(self, plaintext):
+        # Store original text and case pattern
+        self.original_text = plaintext
+        self.case_pattern = [c.isupper() for c in plaintext]
+        
+        plaintext = plaintext.upper()
+        result = ""
+        key_length = len(self.key)
+        
+        for i in range(len(plaintext)):
+            if plaintext[i].isalpha():
+                shift = ord(self.key[i % key_length]) - ord('A')
+                char = chr((ord(plaintext[i]) - ord('A') + shift) % 26 + ord('A'))
+                result += char
+            else:
+                result += plaintext[i]
+        return result
+
+    def decrypt(self, ciphertext):
+        ciphertext = ciphertext.upper()
+        result = ""
+        key_length = len(self.key)
+        
+        for i in range(len(ciphertext)):
+            if ciphertext[i].isalpha():
+                shift = ord(self.key[i % key_length]) - ord('A')
+                char = chr((ord(ciphertext[i]) - ord('A') - shift) % 26 + ord('A'))
+                result += char
+            else:
+                result += ciphertext[i]
+        
+        # Restore original case pattern
+        final_result = ""
+        for c, was_upper in zip(result, self.case_pattern):
+            final_result += c.upper() if was_upper else c.lower()
+        return final_result
+
+
+def read_input(args):
+    """Read from stdin if -i flag is used, otherwise use plaintext arg"""
+    if args.stdin:
+        # Read all content from stdin, maintaining newlines
+        content = []
+        for line in sys.stdin:
+            content.append(line.rstrip('\n'))
+        return '\n'.join(content)
+    return args.plaintext if args.plaintext else "This is a test"
+
+def write_output(encrypted, decrypted, encryption_method):
+    """Write encrypted and decrypted content to separate files"""
+    enc_file = f"encrypted_{encryption_method}.txt"
+    dec_file = f"decrypted_{encryption_method}.txt"
+    
+    with open(enc_file, 'w') as f:
+        f.write(encrypted)
+    with open(dec_file, 'w') as f:
+        f.write(decrypted)
 
 def main():
-    master_key = 0x2b7e151628aed2a6abf7158809cf4f3c  # Replace with your master key
-    plaintext = int.from_bytes(b"This is a test", byteorder="big")  # Replace with your plaintext
+    parser = argparse.ArgumentParser(description="AES/Vigenere Encryption/Decryption")
+    parser.add_argument("--cipher", type=str, choices=['aes', 'vigenere'], default='aes',
+                      help="Cipher type to use (aes or vigenere)")
+    parser.add_argument("--master_key", type=str, help="Key for encryption")
+    parser.add_argument("--plaintext", type=str, help="Text to be encrypted")
+    parser.add_argument("-i", "--stdin", action="store_true", 
+                      help="Read input from stdin")
+    parser.add_argument("-o", "--output", type=str,
+                      help="Output file for results")
+    args = parser.parse_args()
 
-    print(plaintext)
-    
-    aes = AES(master_key)
+    input_text = read_input(args)
 
-    # Encrypt the plaintext
-    ciphertext = aes.encrypt(plaintext)
-    print(f"Ciphertext: {ciphertext}")
+    if args.cipher == 'aes':
+        if args.master_key:
+            master_key = int(args.master_key, 16)
+        else:
+            master_key = 0x2b7e151628aed2a6abf7158809cf4f3c
 
+        # Create AES instance with appropriate mode
+        use_vigenere = args.cipher == 'vigenere'
+        aes = AES(master_key, use_vigenere=use_vigenere)
 
-    # Decrypt the ciphertext
-    decrypted_text = aes.decrypt(ciphertext)
-    print(f"Decrypted text: {decrypted_text}")
+        # Handle input in 16-byte blocks
+        input_bytes = input_text.encode()
+        block_size = 16
 
-    plaintext_bytes = decrypted_text.to_bytes((decrypted_text.bit_length() + 7) // 8, byteorder="big")
+        # Pad input if needed
+        if len(input_bytes) % block_size != 0:
+            padding = block_size - (len(input_bytes) % block_size)
+            input_bytes += bytes([padding] * padding)
 
+        # Process each block
+        ciphertext_blocks = []
+        decrypted_blocks = []
 
-    plaintext_string = plaintext_bytes.decode('utf-8')
+        for i in range(0, len(input_bytes), block_size):
+            block = input_bytes[i:i+block_size]
+            block_int = int.from_bytes(block, byteorder="big")
 
-    print(plaintext_string)
+            # Encrypt and decrypt block
+            ct_block = aes.encrypt(block_int)
+            dt_block = aes.decrypt(ct_block)
+            
+            ciphertext_blocks.append(hex(ct_block))
+            decrypted_blocks.append(dt_block.to_bytes(block_size, byteorder='big'))
 
-# Verifica se o script está sendo executado diretamente
+        # Combine results
+        ciphertext_hex = '[' + ', '.join(ciphertext_blocks) + ']'
+        decrypted_bytes = b''.join(decrypted_blocks)
+
+        # Remove padding from decrypted text
+        if decrypted_bytes[-1] < block_size:
+            decrypted_bytes = decrypted_bytes[:-decrypted_bytes[-1]]
+
+        decrypted_text = decrypted_bytes.decode()
+
+        encrypted_text = ciphertext_hex
+        decrypted_text = decrypted_text
+        
+        if args.output:
+            with open(args.output, 'w') as f:
+                f.write(decrypted_text)
+        write_output(encrypted_text, decrypted_text, 'aes')
+
+    else:  # vigenere
+        key = args.master_key if args.master_key else "SECRETKEY"
+        vig = VigenereCipher(key)
+        encrypted = vig.encrypt(input_text)
+        decrypted = vig.decrypt(encrypted)
+
+        if args.output:
+            with open(args.output, 'w') as f:
+                f.write(decrypted)
+        write_output(encrypted, decrypted, 'vigenere')
+
 if __name__ == "__main__":
     main()
